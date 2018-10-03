@@ -9,12 +9,11 @@
 
 // Wichtige Parameter:
 // PINs
-#define TASTER_PIN    8           // PIN fuer Druckschalter (auf + gezogen)
+#define TASTER_PIN    A1 // 8           // PIN fuer Druckschalter (auf + gezogen)
 #define DHT_PIN       2           // PIN fuer DHT-Daten
 #define LED_PIN       13          // Nutze die eingebaute LED als Signal-LED
-#define ANAUS_PIN     11          // PIN fuer Opto-Koppler: Ein-Aus
-#define MODUS_PIN     12          // PIN fuer Opto-Koppler: Von "Normal" auf "Continuous"
-#define POTI_PIN      0           // Analog-PIN mit dem Potentiometer für die Feuchtschwelleneinstellung
+#define ANAUS_PIN     4 // 11          // PIN fuer Opto-Koppler: Ein-Aus
+#define MODUS_PIN     3 // 12          // PIN fuer Opto-Koppler: Von "Normal" auf "Continuous"
 
 // Zeiten (in Milli-Sekunden)
 #define ZYKLUSZEIT      1000      // 1 Sekunde (Update Display)
@@ -22,6 +21,9 @@
 #define MIN_LAUFZEIT    900000   // 15 Minuten (Wenn angeschaltet, Gerät mindestens so lange laufen lassen
 
 #define DHTTYPE DHT22             // DHT 22  (AM2302), AM2321
+
+#define FEUCHTE_MAX 75
+#define FEUCHTE_MIN 45
 
 // Connect pin 1 (on the left) of the sensor to +5V
 // Connect pin 2 of the sensor to whatever your DHTPIN is
@@ -129,13 +131,13 @@ void loop() {
     if (Hintergrund == 0)
       Anzeige.backlight();
     Hintergrund = Jetzt + 5000;
-    if (newPos < 45) {
+    if (newPos < FEUCHTE_MIN) {
       if (DEBUG_LEVEL > 1) {
         Serial.print("Drehwert zu niedrig: ");
         Serial.println(newPos);
       }
       DrehGeber.setPosition(FeuchtSchwelle);
-    } else if (newPos > 75) {
+    } else if (newPos > FEUCHTE_MAX) {
       if (DEBUG_LEVEL > 1) {
         Serial.print("Drehwert zu hoch: ");
         Serial.println(newPos);
@@ -236,7 +238,14 @@ void Messung() {
       }
     }
   }
-  if (Aktuelle_Feuchte >= FeuchtSchwelle ) {
+  if ((FeuchtSchwelle == FEUCHTE_MAX) && (GeraeteStatus) ) {
+    //    Abschalten, falls per Drehregler der auf MAX gedreht wird und das Gerät läuft
+    if (DEBUG_LEVEL > 1) {
+      Serial.println("Geraet abschalten");
+    }
+    AnAusSchalten();
+  }
+  if ((FeuchtSchwelle < FEUCHTE_MAX) && (Aktuelle_Feuchte >= FeuchtSchwelle )) {
     //  2.3 Gemessener Wert feucht:
     //   2.3.1 Läuft Gerät NICHT
     if (DEBUG_LEVEL > 1) {
@@ -323,9 +332,13 @@ void Anzeige_Feuchte() {
   Anzeige.setCursor(0, 0);
   Anzeige.print("F: I=");
   Anzeige.print(int(Aktuelle_Feuchte));
-  Anzeige.print("% S=");
-  Anzeige.print(int(FeuchtSchwelle));
-  Anzeige.print("%");
+  if(FeuchtSchwelle == FEUCHTE_MAX) {
+    Anzeige.print("% *AUS*");
+  } else {
+    Anzeige.print("% S=");
+    Anzeige.print(int(FeuchtSchwelle));
+    Anzeige.print("%");
+  }
   Anzeige.setCursor(0, 1);
   if (GeraeteStatus) {
     Anzeige.print("Trocknen ");
