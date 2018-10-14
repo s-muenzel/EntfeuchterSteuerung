@@ -9,72 +9,91 @@
 
 // Wichtige Parameter:
 // PINs
-#define TASTER_PIN    A1 // 8           // PIN fuer Druckschalter (auf + gezogen)
+#define TASTER_PIN    A1          // PIN fuer Druckschalter (auf + gezogen)
 #define DHT_PIN       2           // PIN fuer DHT-Daten
 #define LED_PIN       13          // Nutze die eingebaute LED als Signal-LED
-#define ANAUS_PIN     4 // 11          // PIN fuer Opto-Koppler: Ein-Aus
-#define MODUS_PIN     3 // 12          // PIN fuer Opto-Koppler: Von "Normal" auf "Continuous"
+#define ANAUS_PIN     4           // PIN fuer Opto-Koppler: Ein-Aus
+#define MODUS_PIN     3           // PIN fuer Opto-Koppler: Von "Normal" auf "Continuous"
 
 // Zeiten (in Milli-Sekunden)
 #define ZYKLUSZEIT      1000      // 1 Sekunde (Update Display)
+#define LEUCHTZEIT      8000      // 8 Sekunden (Solange bleibt das Display beleuchtet)
 #define MESSZEIT        300000    // 5 Minuten  (Messungsfrequenz)
-#define MIN_LAUFZEIT    900000   // 15 Minuten (Wenn angeschaltet, Gerät mindestens so lange laufen lassen
+#define MIN_LAUFZEIT    900000    // 15 Minuten (Wenn angeschaltet, Gerät mindestens so lange laufen lassen
 
 #define DHTTYPE DHT22             // DHT 22  (AM2302), AM2321
 
 #define FEUCHTE_MAX 75
 #define FEUCHTE_MIN 45
 
-// Connect pin 1 (on the left) of the sensor to +5V
-// Connect pin 2 of the sensor to whatever your DHTPIN is
-// Connect pin 4 (on the right) of the sensor to GROUND
-// Connect a 10K resistor from pin 2 (data) to pin 1 (power) of the sensor
-
-// Initialize DHT sensor.
+// HW Objekte
 DHT dht(DHT_PIN, DHTTYPE);
-
 RotaryEncoder DrehGeber(A2, A3);
-
 LiquidCrystal_I2C Anzeige(0x3F, 16, 2);;
 
+// Globale Variablen
 float Aktuelle_Feuchte = 0.0;
 float FeuchtSchwelle = 0.0;
 boolean GeraeteStatus = false;    // Initialisierung des TrocknerStatus, Anname: Geraet ist beim Einschalten "aus"
 unsigned long GeraeteStartzeit = 0; // Egal bei Status Aus
 unsigned long NaechsteMessung = 0;            // Zeit wann wieder mal gemessen werden soll
-
 unsigned long Hintergrund = 0; // Zeit, wann die Hintergrundbeleuchtung ausgeschaltet wird (0 == ist aus)
+
+
+void Anzeige_Feuchte(bool _Messung_laeuft = false) {
+  if (DEBUG_LEVEL > 3) {
+    Serial.print("Anzeige_Feuchte, Ist: ");
+    Serial.print(Aktuelle_Feuchte);
+    Serial.print(" Soll: ");
+    Serial.println(FeuchtSchwelle);
+  }
+  Anzeige.clear();
+  // Anzeige Zeile 1 immer
+  // F: I=Ist%  S=Soll%
+  // Anzeige Zeile 2 je nach Status:
+  // - Messung laeuft
+  // - Messung: xxx s
+  // - Trocknen xxx s
+  Anzeige.setCursor(0, 0);
+  Anzeige.print("F: I=");
+  Anzeige.print(int(Aktuelle_Feuchte));
+  if (FeuchtSchwelle == FEUCHTE_MAX) {
+    Anzeige.print("% *AUS*");
+  } else {
+    Anzeige.print("% S=");
+    Anzeige.print(int(FeuchtSchwelle));
+    Anzeige.print("%");
+  }
+  Anzeige.setCursor(0, 1);
+  if (_Messung_laeuft) {
+    Anzeige.print("Messung laeuft");
+  } else {
+    if (GeraeteStatus) {
+      Anzeige.print("Trocknen ");
+      unsigned long MSecs;
+      MSecs = millis();
+      Anzeige.print((MSecs - GeraeteStartzeit) / 1000);
+      Anzeige.print("s");
+    } else {
+      Anzeige.print("Messung in ");
+      Anzeige.print((NaechsteMessung - millis()) / 1000);
+      Anzeige.print("s");
+    }
+  }
+}
 
 void setup() {
   // Ausgabe über Seriell
   if (DEBUG_LEVEL > 0) {
     Serial.begin(57600);
-  }
-  if (DEBUG_LEVEL > 0) {
     Serial.println("Init");
   }
 
   EEPROM.get(0, FeuchtSchwelle);
-  /*  if (DEBUG_LEVEL > 1) {
-      Serial.print("Schwelle im Speicher: ");
-      Serial.print(FeuchtSchwelle);
-      Serial.print("  ");
-      Serial.println(int(FeuchtSchwelle));
-    }
-    if((FeuchtSchwelle < 1) || (FeuchtSchwelle > 90) || (int(FeuchtSchwelle) == 0) ) {
-      FeuchtSchwelle = 55;
-      EEPROM.put(0,FeuchtSchwelle);
-      if (DEBUG_LEVEL > 1) {
-        Serial.print("Setze initialen Wert für Schwelle: ");
-        Serial.println(FeuchtSchwelle);
-        Serial.print("Setze initialen Wert für Schwelle: ");
-        Serial.println(float(FeuchtSchwelle));
-      }
-    }*/
-  DrehGeber.setPosition(int(FeuchtSchwelle));
+
 
   // Initialisierung der Ports
-  // Drucktaster 
+  // Drucktaster
   pinMode(TASTER_PIN, INPUT);
   // intene LED als Statusanzeige
   pinMode(LED_PIN, OUTPUT);
@@ -84,6 +103,9 @@ void setup() {
   digitalWrite(ANAUS_PIN, LOW);
   pinMode(MODUS_PIN, OUTPUT);
   digitalWrite(MODUS_PIN, LOW);
+
+  // HW Objekte initialisieren
+  DrehGeber.setPosition(int(FeuchtSchwelle));
 
   Anzeige.begin();
   Anzeige.noBacklight();
@@ -97,12 +119,12 @@ void setup() {
 
 // Zentrale Schleife, taktet mit ZYKLUSZEIT
 void loop() {
-
   static unsigned long letzterUpdate = 0;
+
   // Regelmäßig das Display auf Stand bringen
   unsigned long Jetzt = millis();
-  if (letzterUpdate + 1000 < Jetzt) {
-    Anzeige_Feuchte();
+  if (letzterUpdate + ZYKLUSZEIT0 < Jetzt) {
+    Anzeige_Feuchte(false);
     letzterUpdate = Jetzt;
   }
   // Wenn das Licht an ist, aber die Zeit dafür abgelaufen ist, ausschalten
@@ -113,12 +135,10 @@ void loop() {
 
   // erster Schritt: schauen, ob Knopf gedrueckt ist:
   if ( LOW == digitalRead(TASTER_PIN) ) {
-    // Knopf gedrueckt, dann Licht an
+    // Knopf gedrueckt, dann Licht an und eine Messung wird gestartet
     if (Hintergrund == 0)
       Anzeige.backlight();
-    Hintergrund = Jetzt + 5000;
-    // Mehr macht der Knopf nicht
-    // dann auch eine Messung triggern
+    Hintergrund = Jetzt + LEUCHTZEIT;
     NaechsteMessung = 0;
     if (DEBUG_LEVEL > 2) {
       Serial.println("Knopf gedrückt, triggere Messung");
@@ -130,7 +150,7 @@ void loop() {
   if (FeuchtSchwelle != newPos) {
     if (Hintergrund == 0)
       Anzeige.backlight();
-    Hintergrund = Jetzt + 5000;
+    Hintergrund = Jetzt + LEUCHTZEIT;
     if (newPos < FEUCHTE_MIN) {
       if (DEBUG_LEVEL > 1) {
         Serial.print("Drehwert zu niedrig: ");
@@ -145,14 +165,12 @@ void loop() {
       DrehGeber.setPosition(FeuchtSchwelle);
     } else {
       FeuchtSchwelle = newPos;
-      EEPROM.put(0,FeuchtSchwelle);
+      EEPROM.put(0, FeuchtSchwelle);
       if (DEBUG_LEVEL > 0) {
         Serial.print("Schwelle geaendert: ");
         Serial.println(FeuchtSchwelle);
       }
-      Anzeige_Feuchte();
-      // dann auch eine Messung triggern
-//      NaechsteMessung = 0;
+      Anzeige_Feuchte(false);
     }
   }
 
@@ -164,9 +182,8 @@ void loop() {
     }
     NaechsteMessung = Jetzt + MESSZEIT;
     Messung();
-    Anzeige_Feuchte();
+    Anzeige_Feuchte(false);
   }
-
 }
 
 void Messung() {
@@ -188,7 +205,7 @@ void Messung() {
     Serial.print("Erste Messung: Feuchte=");
     Serial.println(Aktuelle_Feuchte);
   }
-  Anzeige_Messung();
+  Anzeige_Feuchte(true);
   delay(1500);
   MessErfolg = DHT_Messung(&Aktuelle_Feuchte);
 
@@ -264,9 +281,9 @@ void Messung() {
 void AnAusSchalten(void) {
   if (Hintergrund == 0)
     Anzeige.backlight();
-  Hintergrund = millis() + 5000;
+  Hintergrund = millis() + LEUCHTZEIT;
   // Hey, etwas schalten: zeige aktuelle Werte
-  Anzeige_Feuchte();
+  Anzeige_Feuchte(false);
 
   // Einschalten: 200 ms Port ANAUS_PIN auf HIGH, dann 1 s pausieren, dann 200 ms PORT MODUS_PIN auf HIGH (1x --> "Continuous")
   // Ausschalten: 200 ms Port ANAUS_PIN auf HIGH, dann nix mehr. Aber Modus ist dann wurscht, also das gleiche wie beim Einschalten machen
@@ -313,74 +330,5 @@ boolean DHT_Messung(float *f) {
     Serial.println(t);
   }
   return !( isnan(*f) || isnan(t) );
-}
-
-void Anzeige_Feuchte() {
-  if (DEBUG_LEVEL > 3) {
-    Serial.print("Anzeige_Feuchte, Ist: ");
-    Serial.print(Aktuelle_Feuchte);
-    Serial.print(" Soll: ");
-    Serial.println(FeuchtSchwelle);
-  }
-  Anzeige.clear();
-  // Anzeige:
-  // F: I=Ist%  S=Soll%
-  // Messung: xxx s
-
-  // F: I=Ist%  S=Soll%
-  // Trocknen xxx s
-  Anzeige.setCursor(0, 0);
-  Anzeige.print("F: I=");
-  Anzeige.print(int(Aktuelle_Feuchte));
-  if(FeuchtSchwelle == FEUCHTE_MAX) {
-    Anzeige.print("% *AUS*");
-  } else {
-    Anzeige.print("% S=");
-    Anzeige.print(int(FeuchtSchwelle));
-    Anzeige.print("%");
-  }
-  Anzeige.setCursor(0, 1);
-  if (GeraeteStatus) {
-    Anzeige.print("Trocknen ");
-    unsigned long MSecs;
-    MSecs = millis();
-    Anzeige.print((MSecs - GeraeteStartzeit) / 1000);
-    Anzeige.print("s");
-  } else {
-    Anzeige.print("Messung in ");
-    Anzeige.print((NaechsteMessung - millis()) / 1000);
-    Anzeige.print("s");
-  }
-
-}
-
-void Anzeige_Messung() {
-  if (DEBUG_LEVEL > 2) {
-    Serial.print("Anzeige_Messung, Ist: ");
-    Serial.print(Aktuelle_Feuchte);
-    Serial.print(" Soll: ");
-    Serial.println(FeuchtSchwelle);
-  }
-  Anzeige.clear();
-  // Anzeige:
-  // F: I=Ist%  S=Soll%
-  // Messung: xxx s
-
-  // F: I=Ist%  S=Soll%
-  // Trocknen xxx s
-  Anzeige.setCursor(0, 0);
-  Anzeige.print("Messung laeuft");
-  Anzeige.setCursor(0, 1);
-  if (GeraeteStatus) {
-    Anzeige.print("Trocknen ");
-    unsigned long MSecs;
-    MSecs = millis();
-    Anzeige.print((MSecs - GeraeteStartzeit) / 1000);
-    Anzeige.print("s");
-  } else {
-    Anzeige.print("Messung in ");
-    Anzeige.print((NaechsteMessung - millis()) / 1000);
-    Anzeige.print("s");
-  }  
 }
 
