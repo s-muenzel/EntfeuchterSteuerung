@@ -123,7 +123,7 @@ void loop() {
 
   // Regelmäßig das Display auf Stand bringen
   unsigned long Jetzt = millis();
-  if (letzterUpdate + ZYKLUSZEIT0 < Jetzt) {
+  if (letzterUpdate + ZYKLUSZEIT < Jetzt) {
     Anzeige_Feuchte(false);
     letzterUpdate = Jetzt;
   }
